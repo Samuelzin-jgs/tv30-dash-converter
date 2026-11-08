@@ -1,3 +1,4 @@
+import ctypes
 import json
 import os
 import re
@@ -6,6 +7,7 @@ import struct
 import subprocess
 import threading
 import xml.etree.ElementTree as ET
+from ctypes import wintypes
 from fractions import Fraction
 
 MPD_NS = "urn:mpeg:dash:schema:mpd:2011"
@@ -24,6 +26,14 @@ AUDIO_MODES = {
     "Estereo - FLAC (sem perdas)": ("stereo", ["-c:a", "flac"]),
     "Estereo - AAC 256k": ("stereo", ["-c:a", "aac", "-b:a", "256k"]),
     "Sem audio": (None, []),
+}
+
+
+MEM_PRESETS = {
+    "Ilimitado": None,
+    "8 GB": ("8", "90", 8),
+    "6 GB": ("4", "40", 6),
+    "4 GB": ("1", "40", 4),
 }
 
 
@@ -413,8 +423,9 @@ def build_command(ffmpeg, rec, mpd, audio_path, out_path, opts, log=print):
     info = rec.info
     svt = ("color-primaries=9:transfer-characteristics=16:matrix-coefficients=9:color-range=0:"
            "mastering-display=%s:content-light=%s" % (hdr["mastering"], hdr["light"]))
-    if opts.get("lp"):
-        svt += ":lp=%d" % opts["lp"]
+    mem = MEM_PRESETS.get(opts.get("mem") or "Ilimitado")
+    if mem:
+        svt += ":lp=%s:lookahead=%s" % (mem[0], mem[1])
     layout, acodec = AUDIO_MODES[opts["audio"]]
     use_audio = bool(audio_path and layout)
     v_off = a_off = 0.0
@@ -448,12 +459,63 @@ class Job:
     def __init__(self):
         self.cancel = threading.Event()
         self.proc = None
+        self.mem_limit = 0
 
     def kill(self):
         self.cancel.set()
         if self.proc and self.proc.poll() is None:
             subprocess.run(["taskkill", "/T", "/F", "/PID", str(self.proc.pid)],
                            capture_output=True, creationflags=NO_WINDOW)
+
+
+JobObjectExtendedLimitInformation = 9
+JOB_OBJECT_LIMIT_JOB_MEMORY = 0x00000200
+
+
+class _IO_COUNTERS(ctypes.Structure):
+    _fields_ = [(n, ctypes.c_ulonglong) for n in
+                ("ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                 "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
+
+
+class _BASIC_LIMIT(ctypes.Structure):
+    _fields_ = [("PerProcessUserTimeLimit", ctypes.c_ulonglong),
+                ("PerJobUserTimeLimit", ctypes.c_ulonglong),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD)]
+
+
+class _EXT_LIMIT(ctypes.Structure):
+    _fields_ = [("BasicLimitInformation", _BASIC_LIMIT),
+                ("IoCounters", _IO_COUNTERS),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+
+def _apply_memory_limit(pid, limit_bytes):
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    info = _EXT_LIMIT()
+    info.LimitFlags = JOB_OBJECT_LIMIT_JOB_MEMORY
+    info.JobMemoryLimit = limit_bytes
+    h = k32.CreateJobObjectW(None, None)
+    if not h:
+        return
+    if not k32.SetInformationJobObject(h, JobObjectExtendedLimitInformation,
+                                       ctypes.byref(info), ctypes.sizeof(info)):
+        k32.CloseHandle(h)
+        return
+    proc = k32.OpenProcess(0x1FFFFF, False, pid)
+    if proc:
+        k32.AssignProcessToJobObject(h, proc)
+        k32.CloseHandle(proc)
+    k32.CloseHandle(h)
 
 
 def output_duration(ffmpeg, path):
@@ -465,10 +527,12 @@ def output_duration(ffmpeg, path):
         return 0.0
 
 
-def run_encode(cmd, duration, job, on_progress, log_path, ffmpeg=None, out_path=None):
+def run_encode(cmd, duration, job, on_progress, log_path, ffmpeg=None, out_path=None, mem_limit=0):
     with open(log_path, "w", errors="replace") as errf:
         job.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errf, text=True,
                                     errors="replace", creationflags=NO_WINDOW)
+        if mem_limit:
+            _apply_memory_limit(job.proc.pid, mem_limit * 2 ** 30)
         cur = {}
         for line in job.proc.stdout:
             if "=" not in line:
@@ -498,5 +562,8 @@ def run_encode(cmd, duration, job, on_progress, log_path, ffmpeg=None, out_path=
             return "ffmpeg reportou um erro ao fechar a camada LCEVC, mas o arquivo tem a duracao esperada (%s)" % fmt_time(got)
         raise ConvError("Saida incompleta: %s de %s" % (fmt_time(got), fmt_time(duration)))
     if rc != 0:
+        if mem_limit and ("allocate memory failed" in tail or "Cannot allocate" in tail or "Cannot allocate memory" in tail):
+            raise ConvError("A conversao passou do limite de memoria escolhido. "
+                            "Escolha um limite maior ou 'Ilimitado'.")
         raise ConvError("ffmpeg falhou (codigo %s):\n%s" % (rc, tail))
     return None

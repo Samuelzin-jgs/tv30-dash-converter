@@ -55,12 +55,30 @@ def enable_drop(root, callback):
         return False
 
 
+def app_icon_path():
+    base = getattr(sys, "_MEIPASS", APP_DIR)
+    for p in (os.path.join(base, "icon.ico"), os.path.join(APP_DIR, "installer", "icon.ico")):
+        if os.path.exists(p):
+            return p
+    return None
+
+
 class App:
     def __init__(self, root):
         self.root = root
         root.title("TV 3.0 DASH Converter")
         root.geometry("640x600")
         root.minsize(560, 520)
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("tv30.dash.converter.1")
+        except Exception:
+            pass
+        ic = app_icon_path()
+        if ic:
+            try:
+                root.iconbitmap(ic)
+            except Exception:
+                pass
         self.q = queue.Queue()
         self.recs = []
         self.job = None
@@ -87,15 +105,15 @@ class App:
         opt.pack(fill="x", **pad)
         self.crf = tk.IntVar(value=18)
         self.preset = tk.StringVar(value="6")
-        self.lp = tk.StringVar(value="12")
+        self.mem = tk.StringVar(value="Ilimitado")
         self.audio = tk.StringVar(value=list(dc.AUDIO_MODES)[0])
         ttk.Label(opt, text="Qualidade (CRF, menor = melhor):").grid(row=0, column=0, sticky="w", padx=6, pady=3)
         ttk.Spinbox(opt, from_=10, to=40, textvariable=self.crf, width=6).grid(row=0, column=1, sticky="w")
         ttk.Label(opt, text="Velocidade (preset, maior = mais rapido):").grid(row=1, column=0, sticky="w", padx=6, pady=3)
         ttk.Combobox(opt, textvariable=self.preset, values=[str(i) for i in range(2, 11)], width=5,
                      state="readonly").grid(row=1, column=1, sticky="w")
-        ttk.Label(opt, text="Threads do encoder (menos = menos memoria):").grid(row=2, column=0, sticky="w", padx=6, pady=3)
-        ttk.Combobox(opt, textvariable=self.lp, values=["4", "6", "8", "12", "16", "24"], width=5,
+        ttk.Label(opt, text="Memoria (menos = mais lento):").grid(row=2, column=0, sticky="w", padx=6, pady=3)
+        ttk.Combobox(opt, textvariable=self.mem, values=list(dc.MEM_PRESETS), width=12,
                      state="readonly").grid(row=2, column=1, sticky="w")
         ttk.Label(opt, text="Audio:").grid(row=3, column=0, sticky="w", padx=6, pady=3)
         ttk.Combobox(opt, textvariable=self.audio, values=list(dc.AUDIO_MODES), width=30,
@@ -224,7 +242,7 @@ class App:
         if not self.ffmpeg:
             messagebox.showerror("TV 3.0 DASH Converter", "FFmpeg nao encontrado. Use 'Trocar FFmpeg...'.")
             return
-        opts = {"crf": int(self.crf.get()), "preset": int(self.preset.get()), "lp": int(self.lp.get()),
+        opts = {"crf": int(self.crf.get()), "preset": int(self.preset.get()), "mem": self.mem.get(),
                 "audio": self.audio.get()}
         self.busy = True
         self.job = dc.Job()
@@ -270,7 +288,9 @@ class App:
                     self.q.put(("status", "%s: %.1f%%  |  %s fps  |  %s  |  faltam ~%s" % (
                         tag, p * 100, fps, speed, dc.fmt_time(eta) if eta else "--")))
 
-                note = dc.run_encode(cmd, rec.info["duration"], self.job, prog, out + ".log", self.ffmpeg, out)
+                mem = dc.MEM_PRESETS.get(opts["mem"]) or (0, 0, 0)
+                note = dc.run_encode(cmd, rec.info["duration"], self.job, prog, out + ".log", self.ffmpeg, out,
+                                     mem_limit=mem[2] * 2 ** 30)
                 if note:
                     self.say("Aviso: " + note)
                 try:

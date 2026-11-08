@@ -84,7 +84,9 @@ empacota o app com PyInstaller e compila `installer/setup.iss`. Resultado:
 2. Arraste a pasta raiz da gravacao (ex.: `captura-f1-gp-sp-qualy`) para a janela.
    Se houver mais de uma gravacao na pasta, cada uma aparece na lista; selecione as
    que quiser (Ctrl+clique).
-3. Escolha CRF/preset/audio e a pasta de saida (padrao: junto a gravacao).
+3. Escolha CRF/preset/audio, o **limite de memoria** e a pasta de saida (padrao: junto a gravacao).
+   O limite e aplicado de verdade ao ffmpeg (Job Object do Windows): se a conversao estourar,
+   ela para com uma mensagem clara. Menos memoria = mais lento (o encoder usa menos threads).
 4. Clique em **Converter**. A preparacao e rapida (usa hardlinks, so copia o audio);
    a codificacao 4K e lenta (independente de GPU, ~0,3x no preset 9 com 12 threads).
 
