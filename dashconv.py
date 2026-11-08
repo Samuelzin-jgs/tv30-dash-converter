@@ -218,6 +218,7 @@ def analyze(rec, log=print):
     tl = {}
     for rep in [base] + ([enh] if enh else []) + audio[:1]:
         tl[rep] = [(t, segment_info(segs[rep][t])[1]) for t in sorted(segs[rep])]
+    vstart = segment_info(segs[base][tl[base][0][0]])[0]
     if enh:
         common = set(t for t, _ in tl[base]) & set(t for t, _ in tl[enh])
         for rep in (base, enh):
@@ -225,6 +226,7 @@ def analyze(rec, log=print):
             if dropped:
                 log("Aviso: %d segmento(s) de %s sem par na outra camada de video foram ignorados" % (dropped, rep))
             tl[rep] = [x for x in tl[rep] if x[0] in common]
+        vstart = segment_info(segs[base][tl[base][0][0]])[0]
     issues = {}
     for rep, items in tl.items():
         gaps = overl = 0
@@ -237,10 +239,21 @@ def analyze(rec, log=print):
         if gaps or overl:
             log("Aviso: %s tem %d lacuna(s) e %d sobreposicao(oes) na linha do tempo" % (rep, gaps, overl))
     vts = reps[base]["info"]["timescale"]
+    audio_t = []
+    if audio:
+        rep = audio[0]
+        ats = reps[rep]["info"]["timescale"]
+        cut = vstart / float(vts)
+        audio_t = [(t, d) for t, d in tl[rep]]
+        kept = len(audio_t)
+        audio_t = [x for x in audio_t if (x[0] + x[1]) / float(ats) > cut + 1e-6]
+        if kept != len(audio_t):
+            log("Aviso: %d segmento(s) de audio anteriores ao inicio do video foram descartados" % (kept - len(audio_t)))
+        tl[rep] = audio_t
     rec.info = {
         "mpd": mpd, "segs": segs, "reps": reps, "base": base, "enh": enh,
         "audio": audio[0] if audio else None, "tl": tl, "issues": issues,
-        "video_t": tl[base], "audio_t": tl[audio[0]] if audio else [],
+        "video_t": tl[base], "audio_t": audio_t,
         "vts": vts,
         "ats": reps[audio[0]]["info"]["timescale"] if audio else None,
         "duration": sum(d for _, d in tl[base]) / float(vts),

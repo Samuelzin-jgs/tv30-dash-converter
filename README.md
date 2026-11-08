@@ -20,8 +20,10 @@ duplicados na emenda. Este programa:
   exato, eliminando as **sobreposicoes e lacunas** que causam "pulos" e audio repetido;
 - **Monta um MPD estatico** com as duas camadas de video (base VVC 1080p +Enhancement
   LCEVC 4K, `dependencyId`) que o FFmpeg entende, e um `audio.mp4` concatenado;
-- **Descarta o inicio do audio que pertence a segmentos de video descartados**
-  (a parte que sobra quando a gravacao comeca no meio de um segmento de video);
+- **Descarta o audio anterior ao inicio do video** (os segmentos de audio que
+  sobram quando a gravacao comeca no meio de um segmento de video), e realinha
+  o inicio do audio ao do video com `-itsoffset`, preservando a defasagem
+  original entre as trilhas;
 - **Alinha o inicio do audio ao do video** (`-itsoffset`) para nao haver atraso;
 - Le os metadados **HDR10** (mastering display + MaxCLL/MaxFALL) do primeiro frame
   e reaplica no encoder;
