@@ -47,7 +47,7 @@ duplicados na emenda. Este programa:
 Instale o [MSYS2](https://www.msys2.org/) e, no terminal **MSYS2 UCRT64**:
 
 ```bash
-git clone https://github.com/SEU_USUARIO/tv30-dash-converter.git
+git clone https://github.com/Samuelzin-jgs/tv30-dash-converter.git
 cd tv30-dash-converter
 bash tools/build-ffmpeg-mpegh.sh
 ```
