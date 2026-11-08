@@ -31,6 +31,15 @@ duplicados na emenda. Este programa:
   com o filtro `lcevc`, e o audio MPEG-H com o decoder oficial da Fraunhofer
   (`libmpeghdec`), para FLAC 5.1.2 / 5.1 / estereo ou AAC estereo.
 
+## Instalador (recomendado)
+
+O instalador `TV30Converter-Setup-1.0.0.exe` ja leva **tudo dentro**: o app, o FFmpeg
+com MPEG-H + LCEVC + SVT-AV1 e as DLLs necessarias (nao precisa de Python, MSYS2 nem
+de configurar nada). Instala por usuario (sem admin), cria atalhos e desinstalador.
+
+Como o FFmpeg usa o decoder MPEG-H da Fraunhofer (nonfree), o instalador **nao e
+publicado** no GitHub: voce o gera na sua maquina (veja "Gerar o instalador").
+
 ## Requisitos
 
 - Windows 10/11 x64, CPU com AVX2.
@@ -56,9 +65,22 @@ O build usa `mpeghdec` (Fraunhofer) e `LCEVCdec` (V-NOVA) por ligacao estatica.
 Como o `mpeghdec` tem licenca **nonfree**, o `ffmpeg.exe` resultante e para
 **uso pessoal** e **nao pode ser redistribuido** (nem neste repositorio).
 
+## Gerar o instalador
+
+Com o FFmpeg ja compilado (secao acima) e o [Inno Setup 6](https://jrsoftware.org/isinfo.php)
+(`winget install JRSoftware.InnoSetup`):
+
+```bat
+build-installer.bat
+```
+
+Isso seleciona so as DLLs realmente usadas pelo FFmpeg (`tools/make_payload.py`, ~117 MB),
+empacota o app com PyInstaller e compila `installer/setup.iss`. Resultado:
+`release\TV30Converter-Setup-1.0.0.exe` (~36 MB).
+
 ## Como usar
 
-1. `python app.py` (ou duplo clique em `Converter.bat`, ou o .exe gerado).
+1. Abra pelo atalho do instalador (ou, de codigo: `python app.py` / `Converter.bat`).
 2. Arraste a pasta raiz da gravacao (ex.: `captura-f1-gp-sp-qualy`) para a janela.
    Se houver mais de uma gravacao na pasta, cada uma aparece na lista; selecione as
    que quiser (Ctrl+clique).
@@ -80,13 +102,9 @@ O stage (`_tv30_stage`) e removido ao final; so o MKV final fica no disco.
 app.py                    Interface (Tkinter + drag-and-drop nativo do Windows)
 dashconv.py               DASH inventory/timeline/staging/encoding (sem dependencias)
 tools/build-ffmpeg-mpegh.sh  Build do FFmpeg com MPEG-H + LCEVC no MSYS2
-```
-
-## Empacotar como .exe (opcional)
-
-```bash
-pip install pyinstaller
-pyinstaller --onefile --noconsole --name TV30Converter app.py
+tools/make_payload.py     Seleciona as DLLs necessarias do FFmpeg para o instalador
+installer/setup.iss       Script do Inno Setup (PT-BR/EN, icone, atalhos, desinstalador)
+build-installer.bat       Gera o instalador completo
 ```
 
 ## Licenca
