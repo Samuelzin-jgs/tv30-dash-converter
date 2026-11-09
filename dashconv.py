@@ -20,13 +20,75 @@ DEFAULT_HDR = {
     "light": "1000,300",
 }
 
-AUDIO_MODES = {
-    "5.1.2 - FLAC (sem perdas)": ("5.1.2", ["-c:a", "flac"]),
-    "5.1 - FLAC (sem perdas)": ("5.1(side)", ["-c:a", "flac"]),
-    "Estereo - FLAC (sem perdas)": ("stereo", ["-c:a", "flac"]),
-    "Estereo - AAC 256k": ("stereo", ["-c:a", "aac", "-b:a", "256k"]),
-    "Sem audio": (None, []),
+LAYOUTS = {
+    "5.1.2 (3D, 8 canais)": "5.1.2",
+    "5.1 (6 canais)": "5.1(side)",
+    "Estereo": "stereo",
+    "Sem audio": None,
 }
+_ALL = ("5.1.2", "5.1(side)", "stereo")
+_SURR = ("5.1(side)", "stereo")
+AUDIO_CODECS = {
+    "FLAC (sem perdas)": ("flac", {k: ["-c:a", "flac"] for k in _ALL}, _ALL),
+    "PCM 24 bits (sem perdas)": ("pcm", {"5.1.2": ["-c:a", "pcm_s24le"], "5.1(side)": ["-c:a", "pcm_s24le"],
+                                         "stereo": ["-c:a", "pcm_s24le"]}, _ALL),
+    "AAC": ("aac", {"5.1.2": ["-c:a", "aac", "-b:a", "768k"], "5.1(side)": ["-c:a", "aac", "-b:a", "512k"],
+                    "stereo": ["-c:a", "aac", "-b:a", "256k"]}, _ALL),
+    "Opus": ("opus", {"5.1(side)": ["-af", "aformat=channel_layouts=5.1", "-c:a", "libopus", "-b:a", "384k"],
+                      "stereo": ["-c:a", "libopus", "-b:a", "160k"]}, _SURR),
+    "Dolby Digital (AC3)": ("ac3", {"5.1(side)": ["-c:a", "ac3", "-b:a", "448k"],
+                                    "stereo": ["-c:a", "ac3", "-b:a", "256k"]}, _SURR),
+    "Dolby Digital Plus (E-AC3)": ("eac3", {"5.1(side)": ["-c:a", "eac3", "-b:a", "640k"],
+                                            "stereo": ["-c:a", "eac3", "-b:a", "256k"]}, _SURR),
+    "MP3": ("mp3", {"stereo": ["-c:a", "libmp3lame", "-b:a", "256k"]}, ("stereo",)),
+}
+
+VIDEO_CODECS = {
+    "AV1 (SVT-AV1)": "av1",
+    "HEVC / H.265 (x265)": "hevc",
+    "H.264 (x264)": "h264",
+}
+VIDEO_INFO = {
+    "av1": {"suffix": "AV1", "crf": 18, "crf_range": (10, 40), "presets": [str(i) for i in range(2, 11)],
+            "preset": "6"},
+    "hevc": {"suffix": "HEVC", "crf": 20, "crf_range": (14, 34),
+             "presets": ["veryfast", "faster", "fast", "medium", "slow", "slower"], "preset": "medium"},
+    "h264": {"suffix": "H264", "crf": 18, "crf_range": (12, 30),
+             "presets": ["veryfast", "faster", "fast", "medium", "slow", "slower"], "preset": "medium"},
+}
+CONTAINERS = {
+    "MKV (Matroska)": "mkv",
+    "MP4": "mp4",
+    "MOV (QuickTime)": "mov",
+    "WebM": "webm",
+}
+CONTAINER_INFO = {
+    "mkv": {"video": ("av1", "hevc", "h264"),
+            "audio": ("flac", "pcm", "aac", "opus", "ac3", "eac3", "mp3")},
+    "mp4": {"video": ("av1", "hevc", "h264"), "audio": ("flac", "aac", "opus", "ac3", "eac3", "mp3")},
+    "mov": {"video": ("hevc", "h264"), "audio": ("pcm", "aac", "ac3", "eac3", "mp3")},
+    "webm": {"video": ("av1",), "audio": ("opus",)},
+}
+
+
+def audio_codec_ids():
+    return {v[0]: k for k, v in AUDIO_CODECS.items()}
+
+
+def check_combo(opts):
+    ext = opts["container"]
+    ci = CONTAINER_INFO[ext]
+    if opts["vcodec"] not in ci["video"]:
+        return "O conteiner %s nao aceita esse codec de video." % ext.upper()
+    layout = LAYOUTS[opts["layout"]]
+    if layout is None:
+        return None
+    ac = AUDIO_CODECS[opts["acodec"]]
+    if ac[0] not in ci["audio"]:
+        return "O conteiner %s nao aceita esse codec de audio." % ext.upper()
+    if layout not in ac[2]:
+        return "Esse codec de audio nao suporta esse numero de canais."
+    return None
 
 
 MEM_PRESETS = {
@@ -404,6 +466,36 @@ def probe_hdr(fp, mpd, index):
     return hdr
 
 
+def _x26x_master(mastering):
+    m = re.match(r"G\(([\d.]+),([\d.]+)\)B\(([\d.]+),([\d.]+)\)R\(([\d.]+),([\d.]+)\)"
+                 r"WP\(([\d.]+),([\d.]+)\)L\(([\d.]+),([\d.]+)\)", mastering)
+    v = [float(x) for x in m.groups()]
+    c = [int(round(x * 50000)) for x in v[:8]]
+    return "G(%d,%d)B(%d,%d)R(%d,%d)WP(%d,%d)L(%d,%d)" % (
+        c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], int(round(v[8] * 10000)), int(round(v[9] * 10000)))
+
+
+def _video_args(vcodec, opts, hdr):
+    crf, preset = str(opts["crf"]), str(opts["preset"])
+    common = ["-pix_fmt", "yuv420p10le", "-color_primaries", "bt2020", "-color_trc", "smpte2084",
+              "-color_range", "tv"]
+    if vcodec == "av1":
+        svt = ("color-primaries=9:transfer-characteristics=16:matrix-coefficients=9:color-range=0:"
+               "mastering-display=%s:content-light=%s" % (hdr["mastering"], hdr["light"]))
+        mem = MEM_PRESETS.get(opts.get("mem") or "Ilimitado")
+        if mem:
+            svt += ":lp=%s:lookahead=%s" % (mem[0], mem[1])
+        return ["-c:v", "libsvtav1", "-preset", preset, "-crf", crf] + common + ["-svtav1-params", svt]
+    master = _x26x_master(hdr["mastering"])
+    if vcodec == "hevc":
+        xp = ("colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:range=limited:hdr10=1:"
+              "repeat-headers=1:master-display=%s:max-cll=%s" % (master, hdr["light"]))
+        return ["-c:v", "libx265", "-preset", preset, "-crf", crf] + common + ["-x265-params", xp]
+    xp = ("colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:"
+          "mastering-display=%s:cll=%s" % (master, hdr["light"]))
+    return ["-c:v", "libx264", "-preset", preset, "-crf", crf] + common + ["-x264-params", xp]
+
+
 def build_command(ffmpeg, rec, mpd, audio_path, out_path, opts, log=print):
     fp = _ffprobe_of(ffmpeg)
     if not fp:
@@ -421,12 +513,12 @@ def build_command(ffmpeg, rec, mpd, audio_path, out_path, opts, log=print):
     log("HDR10: " + hdr["mastering"] + " | MaxCLL/MaxFALL " + hdr["light"])
     vstart = float((data.get("format") or {}).get("start_time") or 0)
     info = rec.info
-    svt = ("color-primaries=9:transfer-characteristics=16:matrix-coefficients=9:color-range=0:"
-           "mastering-display=%s:content-light=%s" % (hdr["mastering"], hdr["light"]))
-    mem = MEM_PRESETS.get(opts.get("mem") or "Ilimitado")
-    if mem:
-        svt += ":lp=%s:lookahead=%s" % (mem[0], mem[1])
-    layout, acodec = AUDIO_MODES[opts["audio"]]
+    vcodec = opts["vcodec"]
+    err = check_combo(opts)
+    if err:
+        raise ConvError(err)
+    layout = LAYOUTS[opts["layout"]]
+    acodec = AUDIO_CODECS[opts["acodec"]][1].get(layout, []) if layout else []
     use_audio = bool(audio_path and layout)
     v_off = a_off = 0.0
     if use_audio:
@@ -447,9 +539,11 @@ def build_command(ffmpeg, rec, mpd, audio_path, out_path, opts, log=print):
     if use_audio:
         cmd += ["-map", "1:a:0"]
     vf = "lcevc,setparams=colorspace=bt2020nc:color_primaries=bt2020:color_trc=smpte2084:range=tv"
-    cmd += ["-vf", vf, "-c:v", "libsvtav1", "-preset", str(opts["preset"]), "-crf", str(opts["crf"]),
-            "-pix_fmt", "yuv420p10le", "-color_primaries", "bt2020", "-color_trc", "smpte2084",
-            "-color_range", "tv", "-svtav1-params", svt]
+    cmd += ["-vf", vf] + _video_args(vcodec, opts, hdr)
+    if opts["container"] in ("mp4", "mov"):
+        cmd += ["-movflags", "+faststart"]
+        if vcodec == "hevc":
+            cmd += ["-tag:v", "hvc1"]
     cmd += acodec if use_audio else ["-an"]
     cmd += [out_path]
     return cmd
@@ -550,13 +644,15 @@ def run_encode(cmd, duration, job, on_progress, log_path, ffmpeg=None, out_path=
         rc = job.proc.wait()
     if job.cancel.is_set():
         raise ConvError("Cancelado")
-    tail = ""
+    tail = full = ""
     try:
         with open(log_path, errors="replace") as f:
-            tail = "".join(f.readlines()[-8:])
+            lines = f.readlines()
+        tail = "".join(lines[-8:])
+        full = "".join(lines)
     except OSError:
         pass
-    if rc != 0 and "Error flushing BSFs" in tail and out_path and os.path.isfile(out_path):
+    if rc != 0 and "Error flushing BSFs" in full and out_path and os.path.isfile(out_path):
         got = output_duration(ffmpeg, out_path)
         if duration and abs(got - duration) <= max(2.0, duration * 0.005):
             return "ffmpeg reportou um erro ao fechar a camada LCEVC, mas o arquivo tem a duracao esperada (%s)" % fmt_time(got)

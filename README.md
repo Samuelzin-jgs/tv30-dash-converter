@@ -2,9 +2,10 @@
 
 Conversor com interface grafica (Windows) para gravacoes DASH de TV 3.0 brasileira:
 video **LCEVC sobre VVC/H.266 em 4K HDR10** + audio **MPEG-H 3D Audio**.
-Arraste a pasta da gravacao para a janela e pronto: o programa junta os segmentos,
-descarta duplicados, corrige sobreposicoes/lacunas da linha do tempo e converte para
-**AV1 4K 10 bits HDR10 + FLAC/AAC** em um unico MKV.
+Arraste uma ou mais pastas de gravacao para a janela e pronto: elas entram numa **fila**;
+o programa junta os segmentos, descarta duplicados, corrige sobreposicoes/lacunas da
+linha do tempo e converte para **4K 10 bits HDR10** em AV1, HEVC ou H.264, nos
+conteineres MKV, MP4, MOV ou WebM.
 
 ![Captura](docs/screenshot.png)
 
@@ -27,13 +28,25 @@ duplicados na emenda. Este programa:
 - **Alinha o inicio do audio ao do video** (`-itsoffset`) para nao haver atraso;
 - Le os metadados **HDR10** (mastering display + MaxCLL/MaxFALL) do primeiro frame
   e reaplica no encoder;
-- Codifica com **SVT-AV1** (`-crf`, `-preset` configuraveis) o video 4K decodificado
-  com o filtro `lcevc`, e o audio MPEG-H com o decoder oficial da Fraunhofer
-  (`libmpeghdec`), para FLAC 5.1.2 / 5.1 / estereo ou AAC estereo.
+- Codifica o video 4K decodificado com o filtro `lcevc` em **AV1 (SVT-AV1)**,
+  **HEVC (x265)** ou **H.264 (x264)**, sempre com os metadados HDR10, e o audio MPEG-H com
+  o decoder oficial da Fraunhofer (`libmpeghdec`) para FLAC, PCM 24 bits, AAC, Opus,
+  AC3, E-AC3 ou MP3, em 5.1.2 / 5.1 / estereo (conforme o que o codec e o conteiner aceitam).
+
+## Fila, codecs e conteineres
+
+- **Fila**: cada pasta solta (ou escolhida) vira um item com as opcoes vigentes no momento
+  em que foi adicionada. Da para reordenar, remover, limpar concluidos e reaplicar as opcoes
+  aos itens selecionados. "Cancelar atual" pula o item; "Parar fila" interrompe tudo.
+- **Conteineres**: MKV (aceita tudo), MP4, MOV (HEVC/H.264) e WebM (so AV1 + Opus). A
+  interface so mostra as combinacoes de video/audio que o conteiner aceita.
+- **H.264** nao tem HDR10 padronizado: o programa grava os metadados, mas a maioria dos
+  players mostra as cores lavadas. Prefira AV1 ou HEVC.
+- Os problemas de execucao sao gravados em `%LOCALAPPDATA%\TV30Converter\crash.log`.
 
 ## Instalador (recomendado)
 
-O instalador `TV30Converter-Setup-1.0.0.exe` ja leva **tudo dentro**: o app, o FFmpeg
+O instalador `TV30Converter-Setup-1.2.0.exe` ja leva **tudo dentro**: o app, o FFmpeg
 com MPEG-H + LCEVC + SVT-AV1 e as DLLs necessarias (nao precisa de Python, MSYS2 nem
 de configurar nada). Instala por usuario (sem admin), cria atalhos e desinstalador.
 
@@ -76,21 +89,22 @@ build-installer.bat
 
 Isso seleciona so as DLLs realmente usadas pelo FFmpeg (`tools/make_payload.py`, ~117 MB),
 empacota o app com PyInstaller e compila `installer/setup.iss`. Resultado:
-`release\TV30Converter-Setup-1.0.0.exe` (~36 MB).
+`release\TV30Converter-Setup-1.2.0.exe` (~36 MB).
 
 ## Como usar
 
 1. Abra pelo atalho do instalador (ou, de codigo: `python app.py` / `Converter.bat`).
-2. Arraste a pasta raiz da gravacao (ex.: `captura-f1-gp-sp-qualy`) para a janela.
-   Se houver mais de uma gravacao na pasta, cada uma aparece na lista; selecione as
-   que quiser (Ctrl+clique).
-3. Escolha CRF/preset/audio, o **limite de memoria** e a pasta de saida (padrao: junto a gravacao).
+2. Arraste a pasta raiz da gravacao (ex.: `captura-f1-gp-sp-qualy`) para a janela
+   (varias de uma vez tambem vale). Cada gravacao encontrada entra na fila.
+3. Escolha conteiner, codecs, CRF/preset, o **limite de memoria** (so AV1) e a pasta de saida
+   (padrao: junto a gravacao). Muda as opcoes e solta outra pasta para ter configuracoes
+   diferentes na mesma fila.
    O limite e aplicado de verdade ao ffmpeg (Job Object do Windows): se a conversao estourar,
    ela para com uma mensagem clara. Menos memoria = mais lento (o encoder usa menos threads).
-4. Clique em **Converter**. A preparacao e rapida (usa hardlinks, so copia o audio);
+4. Clique em **Iniciar fila**. A preparacao e rapida (usa hardlinks, so copia o audio);
    a codificacao 4K e lenta (independente de GPU, ~0,3x no preset 9 com 12 threads).
 
-O stage (`_tv30_stage`) e removido ao final; so o MKV final fica no disco.
+O stage (`_tv30_stage`) e removido ao final de cada item; so o arquivo final fica no disco.
 
 ## Limitacoes
 

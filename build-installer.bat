@@ -13,7 +13,7 @@ if not exist "C:\ffmpeg-mpegh\bin\ffmpeg.exe" (
 )
 python tools\make_payload.py || exit /b 1
 python -m pip install --quiet pyinstaller || exit /b 1
-python -m PyInstaller --clean --noconfirm --onedir --windowed --name TV30Converter --icon installer\icon.ico --distpath dist --workpath build app.py || exit /b 1
+python -m PyInstaller --clean --noconfirm --onedir --windowed --name TV30Converter --icon installer\icon.ico --add-data "installer\icon.ico;." --distpath dist --workpath build app.py || exit /b 1
 "%ISCC%" installer\setup.iss || exit /b 1
 echo.
 echo Instalador em release\
