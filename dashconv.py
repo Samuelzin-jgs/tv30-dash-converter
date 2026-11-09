@@ -80,7 +80,11 @@ def base_codec(vid):
     return vid.split("_")[0]
 
 
+GPU_WHY = {}
+
+
 def probe_gpu(ffmpeg):
+    GPU_WHY.clear()
     ok = {}
     try:
         r = _run([ffmpeg, "-hide_banner", "-encoders"])
@@ -96,8 +100,13 @@ def probe_gpu(ffmpeg):
                                 "-c:v", vid, "-pix_fmt", "p010le", "-f", "null", "-"],
                                capture_output=True, text=True, timeout=30, creationflags=NO_WINDOW)
             ok[name] = r.returncode == 0
+            if r.returncode != 0:
+                lines = [l for l in r.stderr.splitlines() if l.strip()]
+                why = next((l for l in lines if "river" in l or "capable" in l or "ailed" in l or "not " in l), "")
+                GPU_WHY[name] = why.split("] ", 1)[-1] if why else "falhou ao abrir o encoder"
         except Exception:
             ok[name] = False
+            GPU_WHY[name] = "falhou ao testar"
     return {k: v for k, v in ok.items() if v}
 CONTAINERS = {
     "MKV (Matroska)": "mkv",

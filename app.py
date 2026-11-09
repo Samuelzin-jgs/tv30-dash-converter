@@ -395,6 +395,8 @@ class App:
         text += "  |  GPU: " + (", ".join(sorted({n.split(" - ")[1].split(" (")[0] for n in gpu})) if gpu else "nenhuma")
         self.q.put(("ffmpeg", (ff, text)))
         self.q.put(("gpu", sorted(gpu)))
+        for n, why in dc.GPU_WHY.items():
+            self.say("GPU: %s indisponivel (%s)" % (n, why))
 
     def pick_ffmpeg(self):
         p = filedialog.askopenfilename(title="ffmpeg.exe", filetypes=[("ffmpeg", "ffmpeg.exe")])

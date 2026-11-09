@@ -1,5 +1,5 @@
 #define AppName "TV 3.0 DASH Converter"
-#define AppVersion "1.3.0"
+#define AppVersion "1.3.1"
 #define AppExe "TV30Converter.exe"
 
 [Setup]
