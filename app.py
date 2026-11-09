@@ -128,15 +128,17 @@ class Item:
 def opts_text(o):
     ac = "sem audio" if dc.LAYOUTS[o["layout"]] is None else o["acodec"].split(" (")[0] + " " + o["layout"].split(" (")[0]
     v = dc.VIDEO_INFO[o["vcodec"]]["suffix"]
-    return "%s / %s / %s / CRF %s" % (v, o["container"].upper(), ac, o["crf"])
+    extra = (" / max %g Mbps" % o["bitrate_limit"] if o.get("bitrate_limit") else "") + \
+            (" / todas as faixas" if o.get("all_audio") else "")
+    return "%s / %s / %s / CRF %s%s" % (v, o["container"].upper(), ac, o["crf"], extra)
 
 
 class App:
     def __init__(self, root):
         self.root = root
         root.title("TV 3.0 DASH Converter")
-        root.geometry("760x780")
-        root.minsize(680, 680)
+        root.geometry("800x840")
+        root.minsize(720, 740)
         try:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("tv30.dash.converter.1")
         except Exception:
@@ -194,7 +196,11 @@ class App:
         opt = ttk.LabelFrame(root, text="Opcoes (valem para as gravacoes adicionadas a partir de agora)")
         opt.pack(fill="x", **pad)
         self.container = tk.StringVar(value=list(dc.CONTAINERS)[0])
+        self.vmap = dict(dc.VIDEO_CODECS)
         self.vcodec = tk.StringVar(value=list(dc.VIDEO_CODECS)[0])
+        self.limit_on = tk.BooleanVar(value=False)
+        self.limit_mbps = tk.IntVar(value=40)
+        self.all_audio = tk.BooleanVar(value=False)
         self.crf = tk.IntVar(value=18)
         self.preset = tk.StringVar(value="6")
         self.mem = tk.StringVar(value="Ilimitado")
@@ -209,7 +215,7 @@ class App:
                                          state="readonly")
         self.cb_container.grid(row=0, column=1, sticky="w")
         lbl("Codec de video:", 0, 2)
-        self.cb_vcodec = ttk.Combobox(opt, textvariable=self.vcodec, values=list(dc.VIDEO_CODECS), width=22,
+        self.cb_vcodec = ttk.Combobox(opt, textvariable=self.vcodec, values=list(self.vmap), width=30,
                                       state="readonly")
         self.cb_vcodec.grid(row=0, column=3, sticky="w")
         lbl("Qualidade (CRF, menor = melhor):", 1, 0)
@@ -229,8 +235,15 @@ class App:
         lbl("Codec de audio:", 3, 2)
         self.cb_acodec = ttk.Combobox(opt, textvariable=self.acodec, width=26, state="readonly")
         self.cb_acodec.grid(row=3, column=3, sticky="w")
-        self.hint = ttk.Label(opt, text="", foreground="#666")
-        self.hint.grid(row=4, column=0, columnspan=4, sticky="w", padx=6, pady=(0, 4))
+        lim = ttk.Frame(opt)
+        lim.grid(row=4, column=0, columnspan=2, sticky="w", padx=6, pady=3)
+        ttk.Checkbutton(lim, text="Limitar bitrate de video a", variable=self.limit_on).pack(side="left")
+        ttk.Spinbox(lim, from_=1, to=500, textvariable=self.limit_mbps, width=5).pack(side="left", padx=4)
+        ttk.Label(lim, text="Mbps").pack(side="left")
+        ttk.Checkbutton(opt, text="Exportar todas as faixas de audio", variable=self.all_audio).grid(
+            row=4, column=2, columnspan=2, sticky="w", padx=6)
+        self.hint = ttk.Label(opt, text="", foreground="#666", wraplength=700, justify="left")
+        self.hint.grid(row=5, column=0, columnspan=4, sticky="w", padx=6, pady=(0, 4))
         self.cb_container.bind("<<ComboboxSelected>>", lambda e: self.on_container())
         self.cb_vcodec.bind("<<ComboboxSelected>>", lambda e: self.on_vcodec())
         self.cb_layout.bind("<<ComboboxSelected>>", lambda e: self.refresh_audio())
@@ -275,15 +288,15 @@ class App:
     def on_container(self):
         ext = dc.CONTAINERS[self.container.get()]
         allowed = dc.CONTAINER_INFO[ext]["video"]
-        cur = dc.VIDEO_CODECS[self.vcodec.get()]
+        cur = dc.base_codec(self.vmap[self.vcodec.get()])
         if cur not in allowed:
-            name = [k for k, v in dc.VIDEO_CODECS.items() if v == allowed[0]][0]
+            name = [k for k, v in self.vmap.items() if dc.base_codec(v) == allowed[0]][0]
             self.vcodec.set(name)
             self.on_vcodec(keep_container=True)
         self.refresh_audio()
 
     def on_vcodec(self, keep_container=False):
-        vid = dc.VIDEO_CODECS[self.vcodec.get()]
+        vid = self.vmap[self.vcodec.get()]
         info = dc.VIDEO_INFO[vid]
         self.crf.set(info["crf"])
         self.sp_crf.config(from_=info["crf_range"][0], to=info["crf_range"][1])
@@ -291,11 +304,17 @@ class App:
         self.preset.set(info["preset"])
         self.cb_mem.config(state="readonly" if vid == "av1" else "disabled")
         ext = dc.CONTAINERS[self.container.get()]
-        if not keep_container and vid not in dc.CONTAINER_INFO[ext]["video"]:
+        if not keep_container and dc.base_codec(vid) not in dc.CONTAINER_INFO[ext]["video"]:
             self.container.set(list(dc.CONTAINERS)[0])
         notes = {"av1": "", "hevc": "HEVC: boa compatibilidade com TVs e players, HDR10 preservado.",
                  "h264": "H.264 nao e padrao para HDR10: a maioria dos players vai mostrar cores lavadas."}
-        self.hint.config(text=notes[vid])
+        text = notes.get(vid, "")
+        if info.get("gpu"):
+            text = ("Codificacao por GPU: muito mais rapida, mas com arquivo maior que o software na mesma qualidade. "
+                    "O numero de CRF vale como qualidade constante (menor = melhor).")
+            if vid.endswith(("_amf", "_qsv")):
+                text += " Com o limite de bitrate ligado, o limite vira o bitrate alvo."
+        self.hint.config(text=text)
         self.refresh_audio()
 
     def refresh_audio(self):
@@ -308,7 +327,9 @@ class App:
             self.acodec.set(names[0])
 
     def current_opts(self):
-        return {"container": dc.CONTAINERS[self.container.get()], "vcodec": dc.VIDEO_CODECS[self.vcodec.get()],
+        return {"container": dc.CONTAINERS[self.container.get()], "vcodec": self.vmap[self.vcodec.get()],
+                "bitrate_limit": int(self.limit_mbps.get()) if self.limit_on.get() else 0,
+                "all_audio": bool(self.all_audio.get()),
                 "crf": int(self.crf.get()), "preset": self.preset.get(), "mem": self.mem.get(),
                 "layout": self.layout.get(), "acodec": self.acodec.get()}
 
@@ -344,6 +365,11 @@ class App:
                 elif k == "ffmpeg":
                     self.ffmpeg, text = a
                     self.ff_label.config(text=text)
+                elif k == "gpu":
+                    self.vmap = dict(dc.VIDEO_CODECS)
+                    for name in a:
+                        self.vmap[name] = dc.GPU_CODECS[name]
+                    self.cb_vcodec.config(values=list(self.vmap))
                 elif k == "item":
                     self.refresh_row(a)
                 elif k == "idle":
@@ -364,8 +390,11 @@ class App:
             return
         c = dc.check_ffmpeg(ff)
         miss = [n for n, ok in (("MPEG-H", c["mpegh"]), ("LCEVC", c["lcevc"]), ("SVT-AV1", c["svtav1"])) if not ok]
+        gpu = dc.probe_gpu(ff)
         text = "FFmpeg: " + ff + ("" if not miss else "  (FALTA: " + ", ".join(miss) + ")")
+        text += "  |  GPU: " + (", ".join(sorted({n.split(" - ")[1].split(" (")[0] for n in gpu})) if gpu else "nenhuma")
         self.q.put(("ffmpeg", (ff, text)))
+        self.q.put(("gpu", sorted(gpu)))
 
     def pick_ffmpeg(self):
         p = filedialog.askopenfilename(title="ffmpeg.exe", filetypes=[("ffmpeg", "ffmpeg.exe")])

@@ -40,13 +40,22 @@ duplicados na emenda. Este programa:
   aos itens selecionados. "Cancelar atual" pula o item; "Parar fila" interrompe tudo.
 - **Conteineres**: MKV (aceita tudo), MP4, MOV (HEVC/H.264) e WebM (so AV1 + Opus). A
   interface so mostra as combinacoes de video/audio que o conteiner aceita.
+- **GPU**: o programa testa na abertura quais encoders de hardware funcionam de fato nesta
+  maquina e so mostra esses: HEVC/AV1 via NVIDIA NVENC, AMD AMF e Intel QSV. A decodificacao
+  VVC/LCEVC continua na CPU; a GPU so codifica. H.264 por GPU nao e oferecido porque o hardware
+  nao faz 10 bits nesse codec. Em AMD/Intel com limite de bitrate ligado, o limite vira o bitrate alvo.
+  O AV1 de GPU exige RTX 40+, Radeon RX 7000+ ou Intel Arc.
+- **Limitar bitrate**: caixa de selecao com valor em Mbps (teto de video; CRF continua valendo).
+- **Todas as faixas de audio**: com a caixa marcada, cada representacao de audio da gravacao vira
+  uma faixa no arquivo (titulo = id da representacao). Sem marcar, so a primeira. As gravacoes de
+  teste tinham uma unica representacao; o decoder MPEG-H expoe so o preset padrao.
 - **H.264** nao tem HDR10 padronizado: o programa grava os metadados, mas a maioria dos
   players mostra as cores lavadas. Prefira AV1 ou HEVC.
 - Os problemas de execucao sao gravados em `%LOCALAPPDATA%\TV30Converter\crash.log`.
 
 ## Instalador (recomendado)
 
-O instalador `TV30Converter-Setup-1.2.0.exe` ja leva **tudo dentro**: o app, o FFmpeg
+O instalador `TV30Converter-Setup-1.3.0.exe` ja leva **tudo dentro**: o app, o FFmpeg
 com MPEG-H + LCEVC + SVT-AV1 e as DLLs necessarias (nao precisa de Python, MSYS2 nem
 de configurar nada). Instala por usuario (sem admin), cria atalhos e desinstalador.
 
@@ -89,7 +98,7 @@ build-installer.bat
 
 Isso seleciona so as DLLs realmente usadas pelo FFmpeg (`tools/make_payload.py`, ~117 MB),
 empacota o app com PyInstaller e compila `installer/setup.iss`. Resultado:
-`release\TV30Converter-Setup-1.2.0.exe` (~36 MB).
+`release\TV30Converter-Setup-1.3.0.exe` (~36 MB).
 
 ## Como usar
 

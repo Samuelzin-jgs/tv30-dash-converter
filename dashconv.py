@@ -48,6 +48,16 @@ VIDEO_CODECS = {
     "HEVC / H.265 (x265)": "hevc",
     "H.264 (x264)": "h264",
 }
+GPU_CODECS = {
+    "HEVC - NVIDIA NVENC": "hevc_nvenc",
+    "AV1 - NVIDIA NVENC (RTX 40+)": "av1_nvenc",
+    "HEVC - AMD AMF": "hevc_amf",
+    "AV1 - AMD AMF (RX 7000+)": "av1_amf",
+    "HEVC - Intel QSV": "hevc_qsv",
+    "AV1 - Intel QSV (Arc)": "av1_qsv",
+}
+_Q = {"crf_range": (10, 40), "crf": 24}
+_X = ["veryfast", "faster", "fast", "medium", "slow", "slower"]
 VIDEO_INFO = {
     "av1": {"suffix": "AV1", "crf": 18, "crf_range": (10, 40), "presets": [str(i) for i in range(2, 11)],
             "preset": "6"},
@@ -56,6 +66,39 @@ VIDEO_INFO = {
     "h264": {"suffix": "H264", "crf": 18, "crf_range": (12, 30),
              "presets": ["veryfast", "faster", "fast", "medium", "slow", "slower"], "preset": "medium"},
 }
+for _id in GPU_CODECS.values():
+    _b, _k = _id.split("_")
+    VIDEO_INFO[_id] = dict(_Q, suffix=_b.upper() + "_" + _k.upper(), gpu=True, **{
+        "nvenc": {"presets": ["p1", "p2", "p3", "p4", "p5", "p6", "p7"], "preset": "p5"},
+        "amf": {"presets": ["speed", "balanced", "quality"], "preset": "quality"},
+        "qsv": {"presets": ["veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"],
+                "preset": "slow"},
+    }[_k])
+
+
+def base_codec(vid):
+    return vid.split("_")[0]
+
+
+def probe_gpu(ffmpeg):
+    ok = {}
+    try:
+        r = _run([ffmpeg, "-hide_banner", "-encoders"])
+        have = r.stdout + r.stderr
+    except Exception:
+        return ok
+    for name, vid in GPU_CODECS.items():
+        if vid not in have:
+            continue
+        try:
+            r = subprocess.run([ffmpeg, "-hide_banner", "-v", "error", "-nostdin", "-f", "lavfi", "-i",
+                                "color=c=black:s=1280x720:r=30:d=0.3", "-vf", "format=p010le", "-frames:v", "3",
+                                "-c:v", vid, "-pix_fmt", "p010le", "-f", "null", "-"],
+                               capture_output=True, text=True, timeout=30, creationflags=NO_WINDOW)
+            ok[name] = r.returncode == 0
+        except Exception:
+            ok[name] = False
+    return {k: v for k, v in ok.items() if v}
 CONTAINERS = {
     "MKV (Matroska)": "mkv",
     "MP4": "mp4",
@@ -78,7 +121,7 @@ def audio_codec_ids():
 def check_combo(opts):
     ext = opts["container"]
     ci = CONTAINER_INFO[ext]
-    if opts["vcodec"] not in ci["video"]:
+    if base_codec(opts["vcodec"]) not in ci["video"]:
         return "O conteiner %s nao aceita esse codec de video." % ext.upper()
     layout = LAYOUTS[opts["layout"]]
     if layout is None:
@@ -288,7 +331,8 @@ def analyze(rec, log=print):
     enh = enh[0] if enh else None
 
     tl = {}
-    for rep in [base] + ([enh] if enh else []) + audio[:1]:
+    audio.sort()
+    for rep in [base] + ([enh] if enh else []) + audio:
         tl[rep] = [(t, segment_info(segs[rep][t])[1]) for t in sorted(segs[rep])]
     vstart = segment_info(segs[base][tl[base][0][0]])[0]
     if enh:
@@ -311,23 +355,22 @@ def analyze(rec, log=print):
         if gaps or overl:
             log("Aviso: %s tem %d lacuna(s) e %d sobreposicao(oes) na linha do tempo" % (rep, gaps, overl))
     vts = reps[base]["info"]["timescale"]
-    audio_t = []
-    if audio:
-        rep = audio[0]
+    audios = []
+    for rep in audio:
         ats = reps[rep]["info"]["timescale"]
         cut = vstart / float(vts)
-        audio_t = [(t, d) for t, d in tl[rep]]
-        kept = len(audio_t)
-        audio_t = [x for x in audio_t if (x[0] + x[1]) / float(ats) > cut + 1e-6]
-        if kept != len(audio_t):
-            log("Aviso: %d segmento(s) de audio anteriores ao inicio do video foram descartados" % (kept - len(audio_t)))
-        tl[rep] = audio_t
+        items = [x for x in tl[rep] if (x[0] + x[1]) / float(ats) > cut + 1e-6]
+        if len(items) != len(tl[rep]):
+            log("Aviso: %d segmento(s) de audio %s anteriores ao inicio do video foram descartados" % (
+                len(tl[rep]) - len(items), rep))
+        tl[rep] = items
+        if items:
+            audios.append({"rep": rep, "ats": ats, "audio_t": items})
     rec.info = {
         "mpd": mpd, "segs": segs, "reps": reps, "base": base, "enh": enh,
-        "audio": audio[0] if audio else None, "tl": tl, "issues": issues,
-        "video_t": tl[base], "audio_t": audio_t,
+        "tl": tl, "issues": issues,
+        "video_t": tl[base], "audios": audios,
         "vts": vts,
-        "ats": reps[audio[0]]["info"]["timescale"] if audio else None,
         "duration": sum(d for _, d in tl[base]) / float(vts),
     }
     return rec.info
@@ -354,7 +397,7 @@ def stage(rec, log=print, progress=None, cancel=None):
                 if os.path.exists(p):
                     shutil.copy2(p, os.path.join(sd, name))
                     break
-    total = len(i["video_t"]) * len(vreps) + len(i["audio_t"])
+    total = len(i["video_t"]) * len(vreps) + sum(len(a["audio_t"]) for a in i["audios"])
     done = 0
     for rep in vreps:
         for t, _ in i["tl"][rep]:
@@ -383,23 +426,24 @@ def stage(rec, log=print, progress=None, cancel=None):
             ET.SubElement(newtl, "{%s}S" % MPD_NS, {"t": str(t), "d": str(d)})
     tree.write(os.path.join(sd, "completo.mpd"), encoding="utf-8", xml_declaration=True)
 
-    audio_path = None
-    if i["audio"]:
-        audio_path = os.path.join(sd, "audio.mp4")
-        with open(audio_path, "wb") as w:
-            with open(i["reps"][i["audio"]]["init"], "rb") as f:
+    audio_paths = []
+    for n, a in enumerate(i["audios"]):
+        path = os.path.join(sd, "audio_%d.mp4" % n)
+        with open(path, "wb") as w:
+            with open(i["reps"][a["rep"]]["init"], "rb") as f:
                 shutil.copyfileobj(f, w)
-            for t, _ in i["audio_t"]:
+            for t, _ in a["audio_t"]:
                 if cancel and cancel.is_set():
                     raise ConvError("Cancelado")
-                with open(i["segs"][i["audio"]][t], "rb") as f:
+                with open(i["segs"][a["rep"]][t], "rb") as f:
                     shutil.copyfileobj(f, w)
                 done += 1
                 if progress and done % 200 == 0:
                     progress(done / float(total))
+        audio_paths.append(path)
     if progress:
         progress(1.0)
-    return os.path.join(sd, "completo.mpd"), audio_path
+    return os.path.join(sd, "completo.mpd"), audio_paths
 
 
 def cleanup_stage(rec):
@@ -479,24 +523,41 @@ def _video_args(vcodec, opts, hdr):
     crf, preset = str(opts["crf"]), str(opts["preset"])
     common = ["-pix_fmt", "yuv420p10le", "-color_primaries", "bt2020", "-color_trc", "smpte2084",
               "-color_range", "tv"]
+    limit = float(opts.get("bitrate_limit") or 0)
+    rate = []
+    if limit:
+        rate = ["-maxrate", "%dk" % int(limit * 1000), "-bufsize", "%dk" % int(limit * 2000)]
     if vcodec == "av1":
         svt = ("color-primaries=9:transfer-characteristics=16:matrix-coefficients=9:color-range=0:"
                "mastering-display=%s:content-light=%s" % (hdr["mastering"], hdr["light"]))
         mem = MEM_PRESETS.get(opts.get("mem") or "Ilimitado")
         if mem:
             svt += ":lp=%s:lookahead=%s" % (mem[0], mem[1])
-        return ["-c:v", "libsvtav1", "-preset", preset, "-crf", crf] + common + ["-svtav1-params", svt]
+        return ["-c:v", "libsvtav1", "-preset", preset, "-crf", crf] + rate + common + ["-svtav1-params", svt]
+    gpu = ["-pix_fmt", "p010le", "-color_primaries", "bt2020", "-color_trc", "smpte2084", "-color_range", "tv"]
+    if vcodec.endswith("_nvenc"):
+        return ["-c:v", vcodec, "-preset", preset, "-rc", "vbr", "-cq", crf, "-b:v", "0"] + rate + gpu
+    if vcodec.endswith("_amf"):
+        if limit:
+            return ["-c:v", vcodec, "-quality", preset, "-rc", "vbr_peak", "-b:v", "%dk" % int(limit * 1000),
+                    "-maxrate", "%dk" % int(limit * 1000)] + gpu
+        return ["-c:v", vcodec, "-quality", preset, "-rc", "cqp", "-qp_i", crf, "-qp_p", crf, "-qp_b", crf] + gpu
+    if vcodec.endswith("_qsv"):
+        if limit:
+            return ["-c:v", vcodec, "-preset", preset, "-b:v", "%dk" % int(limit * 1000),
+                    "-maxrate", "%dk" % int(limit * 1000)] + gpu
+        return ["-c:v", vcodec, "-preset", preset, "-global_quality", crf] + gpu
     master = _x26x_master(hdr["mastering"])
     if vcodec == "hevc":
         xp = ("colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:range=limited:hdr10=1:"
               "repeat-headers=1:master-display=%s:max-cll=%s" % (master, hdr["light"]))
-        return ["-c:v", "libx265", "-preset", preset, "-crf", crf] + common + ["-x265-params", xp]
+        return ["-c:v", "libx265", "-preset", preset, "-crf", crf] + rate + common + ["-x265-params", xp]
     xp = ("colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:"
           "mastering-display=%s:cll=%s" % (master, hdr["light"]))
-    return ["-c:v", "libx264", "-preset", preset, "-crf", crf] + common + ["-x264-params", xp]
+    return ["-c:v", "libx264", "-preset", preset, "-crf", crf] + rate + common + ["-x264-params", xp]
 
 
-def build_command(ffmpeg, rec, mpd, audio_path, out_path, opts, log=print):
+def build_command(ffmpeg, rec, mpd, audio_paths, out_path, opts, log=print):
     fp = _ffprobe_of(ffmpeg)
     if not fp:
         raise ConvError("ffprobe nao encontrado ao lado do ffmpeg")
@@ -519,30 +580,29 @@ def build_command(ffmpeg, rec, mpd, audio_path, out_path, opts, log=print):
         raise ConvError(err)
     layout = LAYOUTS[opts["layout"]]
     acodec = AUDIO_CODECS[opts["acodec"]][1].get(layout, []) if layout else []
-    use_audio = bool(audio_path and layout)
-    v_off = a_off = 0.0
-    if use_audio:
-        delta = info["audio_t"][0][0] / float(info["ats"]) - vstart
-        if delta >= 0:
-            a_off = delta
-        else:
-            v_off = -delta
+    tracks = list(zip(info["audios"], audio_paths or [])) if layout else []
+    if tracks and not opts.get("all_audio"):
+        tracks = tracks[:1]
+    use_audio = bool(tracks)
+    deltas = [a["audio_t"][0][0] / float(a["ats"]) - vstart for a, _ in tracks]
+    v_off = max([0.0] + [-d for d in deltas])
+    offs = [d + v_off for d in deltas]
     cmd = [ffmpeg, "-hide_banner", "-y", "-nostdin", "-nostats", "-progress", "pipe:1"]
     if v_off:
         cmd += ["-itsoffset", "%.6f" % v_off]
     cmd += ["-i", mpd]
-    if use_audio:
-        if a_off:
-            cmd += ["-itsoffset", "%.6f" % a_off]
-        cmd += ["-c:a", "libmpeghdec", "-ch_layout", layout, "-i", audio_path]
+    for (a, path), off in zip(tracks, offs):
+        if off:
+            cmd += ["-itsoffset", "%.6f" % off]
+        cmd += ["-c:a", "libmpeghdec", "-ch_layout", layout, "-i", path]
     cmd += ["-map", "0:%d" % vidx]
-    if use_audio:
-        cmd += ["-map", "1:a:0"]
+    for n, (a, _) in enumerate(tracks):
+        cmd += ["-map", "%d:a:0" % (n + 1), "-metadata:s:a:%d" % n, "title=%s" % a["rep"]]
     vf = "lcevc,setparams=colorspace=bt2020nc:color_primaries=bt2020:color_trc=smpte2084:range=tv"
     cmd += ["-vf", vf] + _video_args(vcodec, opts, hdr)
     if opts["container"] in ("mp4", "mov"):
         cmd += ["-movflags", "+faststart"]
-        if vcodec == "hevc":
+        if base_codec(vcodec) == "hevc":
             cmd += ["-tag:v", "hvc1"]
     cmd += acodec if use_audio else ["-an"]
     cmd += [out_path]
