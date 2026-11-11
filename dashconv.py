@@ -607,7 +607,7 @@ def build_command(ffmpeg, rec, mpd, audio_paths, out_path, opts, log=print):
     cmd += ["-map", "0:%d" % vidx]
     for n, (a, _) in enumerate(tracks):
         cmd += ["-map", "%d:a:0" % (n + 1), "-metadata:s:a:%d" % n, "title=%s" % a["rep"]]
-    vf = "lcevc,scale=3840:2160:flags=lanczos,setparams=colorspace=bt2020nc:color_primaries=bt2020:color_trc=smpte2084:range=tv"
+    vf = "lcevc,setparams=colorspace=bt2020nc:color_primaries=bt2020:color_trc=smpte2084:range=tv"
     cmd += ["-vf", vf] + _video_args(vcodec, opts, hdr)
     if opts["container"] in ("mp4", "mov"):
         cmd += ["-movflags", "+faststart"]
