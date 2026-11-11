@@ -59,7 +59,7 @@ duplicados na emenda. Este programa:
 
 ## Instalador (recomendado)
 
-O instalador `TV30Converter-Setup-1.3.1.exe` ja leva **tudo dentro**: o app, o FFmpeg
+O instalador `TV30Converter-Setup-1.3.2.exe` ja leva **tudo dentro**: o app, o FFmpeg
 com MPEG-H + LCEVC + SVT-AV1 e as DLLs necessarias (nao precisa de Python, MSYS2 nem
 de configurar nada). Instala por usuario (sem admin), cria atalhos e desinstalador.
 
@@ -102,7 +102,7 @@ build-installer.bat
 
 Isso seleciona so as DLLs realmente usadas pelo FFmpeg (`tools/make_payload.py`, ~117 MB),
 empacota o app com PyInstaller e compila `installer/setup.iss`. Resultado:
-`release\TV30Converter-Setup-1.3.1.exe` (~36 MB).
+`release\TV30Converter-Setup-1.3.2.exe` (~36 MB).
 
 ## Como usar
 
