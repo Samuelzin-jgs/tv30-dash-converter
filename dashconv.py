@@ -573,10 +573,16 @@ def build_command(ffmpeg, rec, mpd, audio_paths, out_path, opts, log=print):
     r = _run([fp, "-v", "error", "-show_streams", "-show_entries", "format=start_time", "-of", "json", mpd])
     data = json.loads(r.stdout or "{}")
     vidx = None
+    enh_wh = None
     for s in data.get("streams", []):
-        if s.get("codec_type") == "video" and s.get("codec_name") != "lcevc":
+        if s.get("codec_type") != "video":
+            continue
+        if s.get("codec_name") == "lcevc":
+            if s.get("width") and s.get("height"):
+                enh_wh = (s["width"], s["height"])
+            continue
+        if vidx is None:
             vidx = s["index"]
-            break
     if vidx is None:
         raise ConvError("Nao encontrei a trilha de video base no MPD")
     hdr = probe_hdr(fp, mpd, vidx)
@@ -608,7 +614,10 @@ def build_command(ffmpeg, rec, mpd, audio_paths, out_path, opts, log=print):
     for n, (a, _) in enumerate(tracks):
         cmd += ["-map", "%d:a:0" % (n + 1), "-metadata:s:a:%d" % n, "title=%s" % a["rep"]]
     vf = "lcevc,setparams=colorspace=bt2020nc:color_primaries=bt2020:color_trc=smpte2084:range=tv"
-    cmd += ["-vf", vf] + _video_args(vcodec, opts, hdr)
+    cmd += ["-vf", vf]
+    if enh_wh:
+        cmd += ["-s", "%dx%d" % enh_wh]
+    cmd += _video_args(vcodec, opts, hdr)
     if opts["container"] in ("mp4", "mov"):
         cmd += ["-movflags", "+faststart"]
         if base_codec(vcodec) == "hevc":

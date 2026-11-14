@@ -53,13 +53,18 @@ duplicados na emenda. Este programa:
 - **Todas as faixas de audio**: com a caixa marcada, cada representacao de audio da gravacao vira
   uma faixa no arquivo (titulo = id da representacao). Sem marcar, so a primeira. As gravacoes de
   teste tinham uma unica representacao; o decoder MPEG-H expoe so o preset padrao.
+- **Resolucao**: a saida sai em 4K nativo (3840x2160), a resolucao que o LCEVC reconstroi.
+  O filtro `lcevc` do FFmpeg declara o dobro da entrada (7680x4320) antes do primeiro quadro
+  chegar, e sem correcao o encoder era aberto nesse tamanho. O programa fixa a saida no
+  tamanho real da camada de aprimoramento, sem reescalar: os quadros ja saem 4K do filtro e
+  os hashes MD5 dos quadros sao identicos com e sem essa fixacao.
 - **H.264** nao tem HDR10 padronizado: o programa grava os metadados, mas a maioria dos
   players mostra as cores lavadas. Prefira AV1 ou HEVC.
 - Os problemas de execucao sao gravados em `%LOCALAPPDATA%\TV30Converter\crash.log`.
 
 ## Instalador (recomendado)
 
-O instalador `TV30Converter-Setup-1.3.1.exe` ja leva **tudo dentro**: o app, o FFmpeg
+O instalador `TV30Converter-Setup-1.3.3.exe` ja leva **tudo dentro**: o app, o FFmpeg
 com MPEG-H + LCEVC + SVT-AV1 e as DLLs necessarias (nao precisa de Python, MSYS2 nem
 de configurar nada). Instala por usuario (sem admin), cria atalhos e desinstalador.
 
@@ -102,7 +107,7 @@ build-installer.bat
 
 Isso seleciona so as DLLs realmente usadas pelo FFmpeg (`tools/make_payload.py`, ~117 MB),
 empacota o app com PyInstaller e compila `installer/setup.iss`. Resultado:
-`release\TV30Converter-Setup-1.3.1.exe` (~36 MB).
+`release\TV30Converter-Setup-1.3.3.exe` (~36 MB).
 
 ## Como usar
 
